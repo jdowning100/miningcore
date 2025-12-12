@@ -18,12 +18,24 @@ namespace Miningcore.Crypto;
 public class MerkleTree
 {
     /// <summary>
-    /// Creates a new merkle-tree instance.
+    /// Creates a new merkle-tree instance by calculating steps from transaction hashes.
     /// </summary>
-    /// <param name="hashList"></param>
+    /// <param name="hashList">List of transaction hashes (in little-endian format)</param>
     public MerkleTree(IEnumerable<byte[]> hashList)
     {
         Steps = CalculateSteps(hashList);
+    }
+
+    /// <summary>
+    /// Creates a merkle-tree instance from pre-computed branches.
+    /// Used for pools like Quai that provide merkle branches directly in getBlockTemplate.
+    /// </summary>
+    /// <param name="precomputedBranches">Pre-computed merkle branches (must be in little-endian format)</param>
+    /// <param name="precomputed">Marker parameter to distinguish from hash list constructor</param>
+    public MerkleTree(IList<byte[]> precomputedBranches, bool precomputed)
+    {
+        Contract.RequiresNonNull(precomputedBranches);
+        Steps = precomputedBranches;
     }
 
     /// <summary>

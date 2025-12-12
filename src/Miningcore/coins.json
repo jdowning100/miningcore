@@ -2393,6 +2393,71 @@
         "explorerTxLink": "https://explorer.pyrk.org/tx/{0}",
         "explorerAccountLink": "https://explorer.pyrk.org/address/{0}"
     },
+    "quai": {
+        "name": "Quai",
+        "symbol": "QUAI",
+        "family": "quai",
+        "website": "https://quai.network/",
+        "github": "https://github.com/dominant-strategies/go-quai",
+        "market": "",
+        "twitter": "https://twitter.com/QuaiNetwork",
+        "discord": "https://discord.gg/quai",
+        "coinbaseHasher": {
+            "hash": "sha256d"
+        },
+        "headerHasher": {
+            "hash": "sha256d"
+        },
+        "blockHasher": {
+            "hash": "reverse",
+            "args": [
+                {
+                    "hash": "sha256d"
+                }
+            ]
+        },
+        "shareMultiplier": 1,
+        "explorerBlockLink": "https://quaiscan.io/block/$hash$",
+        "explorerTxLink": "https://quaiscan.io/tx/{0}",
+        "explorerAccountLink": "https://quaiscan.io/address/{0}"
+    },
+    "quai-scrypt": {
+        "name": "Quai Scrypt",
+        "canonicalName": "Quai",
+        "symbol": "QUAI",
+        "family": "quai",
+        "website": "https://quai.network/",
+        "github": "https://github.com/dominant-strategies/go-quai",
+        "market": "",
+        "twitter": "https://twitter.com/QuaiNetwork",
+        "discord": "https://discord.gg/quai",
+        "coinbaseHasher": {
+            "hash": "sha256d"
+        },
+        "headerHasher": {
+            "hash": "scrypt",
+            "args": [
+                1024,
+                1
+            ]
+        },
+        "blockHasher": {
+            "hash": "reverse",
+            "args": [
+                {
+                    "hash": "scrypt",
+                    "args": [
+                        1024,
+                        1
+                    ]
+                }
+            ]
+        },
+        "shareMultiplier": 65536,
+        "explorerBlockLink": "https://quaiscan.io/block/$hash$",
+        "explorerTxLink": "https://quaiscan.io/tx/{0}",
+        "explorerAccountLink": "https://quaiscan.io/address/{0}"
+    },
     "raptoreum": {
         "name": "Raptoreum",
         "canonicalName": "Raptoreum",

@@ -236,6 +236,11 @@ public class AutofacModule : Module
         builder.RegisterType<ProgpowJobManager>();
 
         //////////////////////
+        // Quai
+
+        builder.RegisterType<QuaiBitcoinJobManager>();
+
+        //////////////////////
         // Satoshicash
 
         builder.RegisterType<SatoshicashJobManager>();

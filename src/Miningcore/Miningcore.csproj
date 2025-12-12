@@ -126,10 +126,10 @@
       </Content>
     </ItemGroup>
 
-    <!-- Build library binaries from source on Linux -->
-    <Target Name="BuildNativeLibsLinux" AfterTargets="AfterBuild" Condition="'$(IsLinux)' == 'true'">
+    <!-- Build library binaries from source on Linux (commented for fast iteration) -->
+    <!-- <Target Name="BuildNativeLibsLinux" AfterTargets="AfterBuild" Condition="'$(IsLinux)' == 'true'">
         <Exec Command="(cd $(ProjectDir) &amp;&amp; sh build-libs-linux.sh $(OutDir))" />
-    </Target>
+    </Target> -->
 
     <!-- Include library binaries in publish on Windows -->
     <Target Name="NativeLibsPublishIncludeWin" BeforeTargets="PrepareForPublish" Condition="'$(IsWindows)' == 'true'">

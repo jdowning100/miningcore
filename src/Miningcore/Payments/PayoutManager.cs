@@ -144,6 +144,7 @@ public class PayoutManager : BackgroundService
                 break;
             
             case CoinFamily.Progpow:
+            case CoinFamily.Quai:
             case CoinFamily.Satoshicash:
                 return CoinFamily.Bitcoin;
         }
