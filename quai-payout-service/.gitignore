@@ -1,0 +1,10 @@
+# Environment files with secrets
+.env
+logs/
+log
+# Binary
+quai-payout-service
+
+# IDE
+.idea/
+.vscode/

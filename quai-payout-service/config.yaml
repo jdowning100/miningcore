@@ -1,0 +1,55 @@
+# Quai Payout Service Configuration
+
+# Quai node RPC endpoint (for reading data: balances, receipts, etc.)
+quai_rpc: "http://localhost:9200"
+
+# Quai RPC endpoint for sending transactions (use public node for reliability)
+quai_tx_rpc: "https://orchard.rpc.quai.network/cyprus1"
+
+# Chain ID (15000 for testnet, mainnet TBD)
+chain_id: 15000
+
+# PostgreSQL connection string for miningcore database
+postgres_conn_str: "host=localhost port=5432 user=miningcore password=password dbname=miningcore sslmode=disable"
+
+# Encrypted keystore files (Web3 Secret Storage format)
+# The service will prompt for password at startup to decrypt
+# Pool IDs must match miningcore pool configuration
+keystore_paths:
+  quai-sha256: "/home/jonathan/miningcore/sha-key-encrypted.json"
+  quai-scrypt: "/home/jonathan/miningcore/scrypt-key-encrypted.json"
+
+# Starting block height for initial scan (only used if no saved state exists)
+# Set this close to current block height to avoid scanning from genesis
+# If 0 or omitted, will start from (current_height - 100) on first run
+start_block_height: 0
+
+# Confirmation depth before considering rewards confirmed (avoids reorgs)
+# Scan blocks at current_height - confirmation_depth
+confirmation_depth: 10
+
+# Coinbase maturity in blocks (how long until rewards unlock)
+# Testnet: 100 blocks
+# Mainnet: ConversionLockPeriod (~2 weeks of blocks)
+coinbase_maturity: 100
+
+# Minimum payout threshold in QUAI
+min_payout_threshold: 0.1
+
+# How often to scan for new rewards (seconds)
+scan_interval_seconds: 10
+
+# How often to process payouts (seconds)
+payout_interval_seconds: 30
+
+# Pool fee percentage (0.01 = 1%)
+pool_fee_percent: 0.01
+
+# Address to send pool fees to
+pool_fee_address: ""
+
+# Log level (debug, info, warn, error)
+log_level: "info"
+
+# State file path for persisting tracker state
+state_file_path: "payout_state.json"

@@ -1,0 +1,84 @@
+# Quai Payout Service Configuration
+# Copy this file to config.yaml and adjust values for your setup
+
+# Quai node RPC endpoint (Zone 0-0)
+quai_rpc: "http://localhost:8610"
+
+# Chain ID for Quai network
+# Testnet: 9000, Mainnet: 9001
+chain_id: 9000
+
+# PostgreSQL connection string for miningcore database
+postgres_conn_str: "host=localhost port=5432 user=miningcore password=your_password dbname=miningcore sslmode=disable"
+
+# ============================================================================
+# KEY MANAGEMENT - Choose ONE of the following methods:
+# ============================================================================
+
+# METHOD 1: Encrypted Keystores (RECOMMENDED)
+# Paths to encrypted keystore files (Web3 Secret Storage / go-quai format)
+# The service will prompt for password at startup to decrypt all keystores
+# Addresses are automatically extracted from keystores (coinbase_addresses not needed)
+keystore_paths:
+  quai-sha256: "/path/to/sha-key-encrypted.json"
+  quai-scrypt: "/path/to/scrypt-key-encrypted.json"
+
+# METHOD 2: Raw Private Keys (less secure, use for testing only)
+# If using this method, comment out keystore_paths above and uncomment below
+#
+# Coinbase addresses to track (keyed by miningcore pool ID)
+# These are the addresses that receive mining rewards
+# The pool ID must match your miningcore pool configuration
+# coinbase_addresses:
+#   quai-sha256: "0x1234567890abcdef1234567890abcdef12345678"
+#   quai-scrypt: ""  # Leave empty if not running scrypt pool
+#
+# Private keys for payout wallets (keyed by miningcore pool ID)
+# SECURITY: Prefer using environment variables instead of storing keys here
+# Environment variable format: POOL_PRIVATE_KEY_<POOL_ID_UPPERCASE_UNDERSCORED>
+# Examples:
+#   - POOL_PRIVATE_KEY_QUAI_SHA256 for pool ID "quai-sha256"
+#   - POOL_PRIVATE_KEY_QUAI_SCRYPT for pool ID "quai-scrypt"
+# private_keys:
+#   quai-sha256: ""  # Set via POOL_PRIVATE_KEY_QUAI_SHA256 environment variable
+#   quai-scrypt: ""  # Set via POOL_PRIVATE_KEY_QUAI_SCRYPT environment variable
+
+# Confirmation depth before considering rewards confirmed
+# Helps avoid issues with chain reorgs
+confirmation_depth: 10
+
+# Coinbase maturity in blocks (how long until rewards unlock)
+# This should match the lockup period for lockup byte 0
+# Testnet: ~100 blocks, Mainnet: ~2 weeks worth of blocks
+coinbase_maturity: 100
+
+# Minimum payout threshold in QUAI
+# Miners must accumulate at least this much before receiving a payout
+# Balances are aggregated across all configured pools
+min_payout_threshold: 0.1
+
+# How often to scan for new coinbase rewards (seconds)
+scan_interval_seconds: 30
+
+# How often to process payouts to miners (seconds)
+payout_interval_seconds: 300  # 5 minutes
+
+# Pool fee percentage (0.0 to 1.0)
+# 0.01 = 1% fee
+pool_fee_percent: 0.01
+
+# Address to send pool fees to
+# Leave empty to skip fee collection
+pool_fee_address: "0xYOUR_FEE_COLLECTION_ADDRESS"
+
+# Log level: debug, info, warn, error
+log_level: "info"
+
+# Note: Tracker state is stored in PostgreSQL (payout_tracker_state and
+# pending_coinbase_rewards tables) for durability and consistency.
+#
+# Multi-Pool Support:
+# This service can manage multiple miningcore pools with a single instance.
+# - Configure each pool's coinbase address and private key
+# - Miner balances are tracked per-pool but aggregated for payouts
+# - PPLNS scores are calculated per-pool based on which pool's coinbase receives rewards
