@@ -224,3 +224,31 @@ func (c *Client) GetTransactionReceipt(txHash string) (*TransactionReceipt, erro
 	}
 	return result, nil
 }
+
+// CoinbaseTx represents a coinbase transaction returned by GetCoinbaseTxForWorkShareHash
+type CoinbaseTx struct {
+	Hash        string `json:"hash"`
+	Type        string `json:"type"`
+	To          string `json:"to"`
+	Value       string `json:"value"`
+	Input       string `json:"input"`
+	BlockHash   string `json:"blockHash"`
+	BlockNumber string `json:"blockNumber"`
+}
+
+// GetCoinbaseTxForWorkShareHash queries the node for the coinbase transaction
+// associated with a given workshare hash. Returns nil if not found yet.
+func (c *Client) GetCoinbaseTxForWorkShareHash(workshareHash string) (*CoinbaseTx, error) {
+	var result *CoinbaseTx
+	if err := c.Call("quai_getCoinbaseTxForWorkShareHash", []interface{}{workshareHash}, &result); err != nil {
+		// Check if it's a "not found" error - this is expected for pending workshares
+		if rpcErr, ok := err.(*RPCError); ok {
+			if strings.Contains(rpcErr.Message, "no block found") ||
+				strings.Contains(rpcErr.Message, "no coinbase") {
+				return nil, nil // Not found yet, not an error
+			}
+		}
+		return nil, err
+	}
+	return result, nil
+}

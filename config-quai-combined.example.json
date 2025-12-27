@@ -1,0 +1,130 @@
+{
+    "logging": {
+      "level": "debug",
+      "enableConsoleLog": true,
+      "enableConsoleColors": true,
+      "logFile": "./miningcore.log"
+    },
+    "banning": {
+      "manager": "Integrated",
+      "banOnJunkReceive": false
+    },
+    "notifications": {
+      "enabled": false
+    },
+    "paymentProcessing": {
+      "enabled": false,
+      "interval": 600,
+      "coinbaseString": "Quai Pool"
+    },
+    "api": {
+      "enabled": true,
+      "listenAddress": "127.0.0.1",
+      "port": 4000,
+      "rateLimiting": {
+        "disabled": true
+      }
+    },
+    "persistence": {
+      "postgres": {
+        "host": "localhost",
+        "port": 5432,
+        "database": "miningcore",
+        "user": "miningcore",
+        "password": "password"
+      }
+    },
+    "pools": [
+      {
+        "id": "quai-sha256",
+        "enabled": true,
+        "coin": "quai",
+        "address": "<your quai address>",
+        "rewardRecipients": [],
+        "blockRefreshInterval": 500,
+        "extra": {
+          "maxActiveJobs": 100
+        },
+        "jobRebroadcastTimeout": 30,
+        "clientConnectionTimeout": 600,
+        "enableAsicBoost": true,
+        "banning": {
+          "enabled": true,
+          "time": 600,
+          "invalidPercent": 50,
+          "checkThreshold": 50
+        },
+        "ports": {
+          "3334": {
+            "listenAddress": "0.0.0.0",
+            "difficulty": 100000,
+            "name": "SHA256 ASIC",
+            "varDiff": {
+              "minDiff": 50000,
+              "maxDiff": 2000000,
+              "targetTime": 15,
+              "retargetTime": 60,
+              "variancePercent": 30
+            }
+          }
+        },
+        "daemons": [
+          {
+            "host": "localhost",
+            "port": 9200,
+            "user": "",
+            "password": ""
+          }
+        ],
+        "paymentProcessing": {
+          "enabled": false
+        }
+      },
+      {
+        "id": "quai-scrypt",
+        "enabled": true,
+        "coin": "quai-scrypt",
+        "address": "<a different quai address>",
+        "rewardRecipients": [],
+        "blockRefreshInterval": 500,
+        "extra": {
+          "maxActiveJobs": 100
+        },
+        "jobRebroadcastTimeout": 30,
+        "clientConnectionTimeout": 600,
+        "enableAsicBoost": true,
+        "banning": {
+          "enabled": true,
+          "time": 600,
+          "invalidPercent": 50,
+          "checkThreshold": 50
+        },
+        "ports": {
+          "3335": {
+            "listenAddress": "0.0.0.0",
+            "difficulty": 50000,
+            "name": "Scrypt ASIC",
+            "varDiff": {
+              "minDiff": 1000,
+              "maxDiff": 500000,
+              "targetTime": 15,
+              "retargetTime": 90,
+              "variancePercent": 30
+            }
+          }
+        },
+        "daemons": [
+          {
+            "host": "localhost",
+            "port": 9200,
+            "user": "",
+            "password": ""
+          }
+        ],
+        "paymentProcessing": {
+          "enabled": false
+        }
+      }
+    ]
+  }
+  

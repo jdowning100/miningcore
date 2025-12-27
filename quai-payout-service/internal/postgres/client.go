@@ -224,7 +224,8 @@ func (c *Client) RecordPayment(poolID, address, coin, txHash string, amountWei *
 // GetPendingBlocks returns blocks that are pending confirmation (across all configured pools)
 func (c *Client) GetPendingBlocks() ([]Block, error) {
 	query := `
-		SELECT id, blockheight, status, reward, hash, created
+		SELECT id, poolid, blockheight, status, COALESCE(type, ''), reward, hash,
+		       COALESCE(transactionconfirmationdata, ''), created
 		FROM blocks
 		WHERE poolid = ANY($1) AND status = 'pending'
 		ORDER BY blockheight ASC
@@ -241,7 +242,7 @@ func (c *Client) GetPendingBlocks() ([]Block, error) {
 		var b Block
 		var reward sql.NullFloat64
 		var hash sql.NullString
-		if err := rows.Scan(&b.ID, &b.BlockHeight, &b.Status, &reward, &hash, &b.Created); err != nil {
+		if err := rows.Scan(&b.ID, &b.PoolID, &b.BlockHeight, &b.Status, &b.Type, &reward, &hash, &b.WorkshareHash, &b.Created); err != nil {
 			return nil, fmt.Errorf("failed to scan block row: %w", err)
 		}
 		if reward.Valid {
@@ -258,12 +259,43 @@ func (c *Client) GetPendingBlocks() ([]Block, error) {
 
 // Block represents a block record
 type Block struct {
-	ID          int64
-	BlockHeight int64
-	Status      string
-	Reward      float64
-	Hash        string
-	Created     time.Time
+	ID            int64
+	PoolID        string
+	BlockHeight   int64
+	Status        string
+	Type          string // Algorithm type: "sha" or "scrypt"
+	Reward        float64
+	Hash          string
+	WorkshareHash string // Stored in transactionconfirmationdata - the workshare hash from node
+	Created       time.Time
+}
+
+// BlockLookupResult contains the pool ID and algorithm for a found block
+type BlockLookupResult struct {
+	PoolID    string
+	Algorithm string // "sha" or "scrypt"
+}
+
+// LookupBlockByWorkshareHash looks up a block by its workshare hash (stored in transactionconfirmationdata)
+// Returns nil if no matching block is found
+func (c *Client) LookupBlockByWorkshareHash(workshareHash string) (*BlockLookupResult, error) {
+	query := `
+		SELECT poolid, COALESCE(type, '') as type
+		FROM blocks
+		WHERE transactionconfirmationdata = $1
+		LIMIT 1
+	`
+
+	var result BlockLookupResult
+	err := c.db.QueryRow(query, workshareHash).Scan(&result.PoolID, &result.Algorithm)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to lookup block by workshare hash: %w", err)
+	}
+
+	return &result, nil
 }
 
 // UpdateBlockStatus updates the status of a block
@@ -273,6 +305,23 @@ func (c *Client) UpdateBlockStatus(blockID int64, status string, reward float64)
 	_, err := c.db.Exec(query, status, reward, blockID)
 	if err != nil {
 		return fmt.Errorf("failed to update block status: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateBlockStatusByWorkshareHash updates the status of a block using its workshare hash
+func (c *Client) UpdateBlockStatusByWorkshareHash(workshareHash, status string, reward float64) error {
+	query := `UPDATE blocks SET status = $1, reward = $2 WHERE transactionconfirmationdata = $3`
+
+	result, err := c.db.Exec(query, status, reward, workshareHash)
+	if err != nil {
+		return fmt.Errorf("failed to update block status: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		log.Printf("Warning: no block found with workshare hash %s to update", workshareHash)
 	}
 
 	return nil
@@ -423,9 +472,12 @@ func (c *Client) EnsureTrackerTables() error {
 	}
 
 	// Table for pending coinbase rewards
+	// workshare_hash is the unique identifier (from block submission)
+	// tx_hash is the coinbase transaction hash (discovered later via API or blockchain scan)
 	rewardsTableQuery := `
 		CREATE TABLE IF NOT EXISTS pending_coinbase_rewards (
-			tx_hash TEXT PRIMARY KEY,
+			workshare_hash TEXT PRIMARY KEY,
+			tx_hash TEXT,
 			poolid TEXT NOT NULL,
 			to_address TEXT NOT NULL,
 			value NUMERIC(38,0) NOT NULL,
@@ -523,22 +575,23 @@ func (c *Client) UpdateTrackerState(state *TrackerState) error {
 
 // CoinbaseReward represents a tracked coinbase reward
 type CoinbaseReward struct {
-	TxHash       string
-	PoolID       string // Which pool this reward belongs to
-	ToAddress    string
-	Value        *big.Int
-	Algorithm    string
-	BlockHeight  int64
-	BlockHash    string
-	UnlockHeight int64
-	IsUnlocked   bool
-	IsPaidOut    bool
-	MinerScores  map[string]float64
-	Created      time.Time
+	WorkshareHash string   // Unique identifier - the workshare hash from block submission
+	TxHash        string   // Coinbase transaction hash (may be empty until discovered)
+	PoolID        string   // Which pool this reward belongs to
+	ToAddress     string
+	Value         *big.Int
+	Algorithm     string
+	BlockHeight   int64
+	BlockHash     string
+	UnlockHeight  int64
+	IsUnlocked    bool
+	IsPaidOut     bool
+	MinerScores   map[string]float64
+	Created       time.Time
 }
 
 // InsertCoinbaseReward inserts a new coinbase reward
-// The reward.PoolID field must be set to indicate which pool found the block
+// The reward.PoolID and reward.WorkshareHash fields must be set
 func (c *Client) InsertCoinbaseReward(reward *CoinbaseReward) error {
 	// Serialize miner scores to JSON
 	var minerScoresJSON []byte
@@ -552,9 +605,9 @@ func (c *Client) InsertCoinbaseReward(reward *CoinbaseReward) error {
 
 	query := `
 		INSERT INTO pending_coinbase_rewards
-		(tx_hash, poolid, to_address, value, algorithm, block_height, block_hash, unlock_height, is_unlocked, is_paid_out, miner_scores, created)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
-		ON CONFLICT (tx_hash) DO NOTHING
+		(workshare_hash, tx_hash, poolid, to_address, value, algorithm, block_height, block_hash, unlock_height, is_unlocked, is_paid_out, miner_scores, created)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+		ON CONFLICT (workshare_hash) DO NOTHING
 	`
 
 	valueStr := "0"
@@ -563,8 +616,9 @@ func (c *Client) InsertCoinbaseReward(reward *CoinbaseReward) error {
 	}
 
 	_, err = c.db.Exec(query,
-		reward.TxHash,
-		reward.PoolID, // Use the pool ID from the reward
+		reward.WorkshareHash,
+		reward.TxHash, // May be empty if not yet discovered
+		reward.PoolID,
 		reward.ToAddress,
 		valueStr,
 		reward.Algorithm,
@@ -585,7 +639,7 @@ func (c *Client) InsertCoinbaseReward(reward *CoinbaseReward) error {
 // GetPendingCoinbaseRewards returns all pending (not paid out) coinbase rewards across all configured pools
 func (c *Client) GetPendingCoinbaseRewards() ([]*CoinbaseReward, error) {
 	query := `
-		SELECT tx_hash, poolid, to_address, value::text, algorithm, block_height, block_hash,
+		SELECT workshare_hash, COALESCE(tx_hash, ''), poolid, to_address, value::text, algorithm, block_height, block_hash,
 		       unlock_height, is_unlocked, is_paid_out, miner_scores, created
 		FROM pending_coinbase_rewards
 		WHERE poolid = ANY($1) AND is_paid_out = FALSE
@@ -605,6 +659,7 @@ func (c *Client) GetPendingCoinbaseRewards() ([]*CoinbaseReward, error) {
 		var minerScoresJSON []byte
 
 		if err := rows.Scan(
+			&r.WorkshareHash,
 			&r.TxHash,
 			&r.PoolID,
 			&r.ToAddress,
@@ -626,7 +681,7 @@ func (c *Client) GetPendingCoinbaseRewards() ([]*CoinbaseReward, error) {
 
 		if len(minerScoresJSON) > 0 {
 			if err := json.Unmarshal(minerScoresJSON, &r.MinerScores); err != nil {
-				log.Printf("Warning: failed to unmarshal miner scores for %s: %v", r.TxHash, err)
+				log.Printf("Warning: failed to unmarshal miner scores for %s: %v", r.WorkshareHash, err)
 				r.MinerScores = make(map[string]float64)
 			}
 		} else {
@@ -642,7 +697,7 @@ func (c *Client) GetPendingCoinbaseRewards() ([]*CoinbaseReward, error) {
 // GetUnlockedCoinbaseRewards returns unlocked rewards that haven't been paid out (across all configured pools)
 func (c *Client) GetUnlockedCoinbaseRewards() ([]*CoinbaseReward, error) {
 	query := `
-		SELECT tx_hash, poolid, to_address, value::text, algorithm, block_height, block_hash,
+		SELECT workshare_hash, COALESCE(tx_hash, ''), poolid, to_address, value::text, algorithm, block_height, block_hash,
 		       unlock_height, is_unlocked, is_paid_out, miner_scores, created
 		FROM pending_coinbase_rewards
 		WHERE poolid = ANY($1) AND is_unlocked = TRUE AND is_paid_out = FALSE
@@ -662,6 +717,7 @@ func (c *Client) GetUnlockedCoinbaseRewards() ([]*CoinbaseReward, error) {
 		var minerScoresJSON []byte
 
 		if err := rows.Scan(
+			&r.WorkshareHash,
 			&r.TxHash,
 			&r.PoolID,
 			&r.ToAddress,
@@ -683,7 +739,7 @@ func (c *Client) GetUnlockedCoinbaseRewards() ([]*CoinbaseReward, error) {
 
 		if len(minerScoresJSON) > 0 {
 			if err := json.Unmarshal(minerScoresJSON, &r.MinerScores); err != nil {
-				log.Printf("Warning: failed to unmarshal miner scores for %s: %v", r.TxHash, err)
+				log.Printf("Warning: failed to unmarshal miner scores for %s: %v", r.WorkshareHash, err)
 				r.MinerScores = make(map[string]float64)
 			}
 		} else {
@@ -696,20 +752,20 @@ func (c *Client) GetUnlockedCoinbaseRewards() ([]*CoinbaseReward, error) {
 	return rewards, rows.Err()
 }
 
-// MarkCoinbaseRewardUnlocked marks a reward as unlocked
-func (c *Client) MarkCoinbaseRewardUnlocked(txHash string) error {
-	query := `UPDATE pending_coinbase_rewards SET is_unlocked = TRUE WHERE tx_hash = $1`
-	_, err := c.db.Exec(query, txHash)
+// MarkCoinbaseRewardUnlocked marks a reward as unlocked (by workshare hash)
+func (c *Client) MarkCoinbaseRewardUnlocked(workshareHash string) error {
+	query := `UPDATE pending_coinbase_rewards SET is_unlocked = TRUE WHERE workshare_hash = $1`
+	_, err := c.db.Exec(query, workshareHash)
 	if err != nil {
 		return fmt.Errorf("failed to mark reward unlocked: %w", err)
 	}
 	return nil
 }
 
-// MarkCoinbaseRewardPaidOut marks a reward as paid out
-func (c *Client) MarkCoinbaseRewardPaidOut(txHash string) error {
-	query := `UPDATE pending_coinbase_rewards SET is_paid_out = TRUE WHERE tx_hash = $1`
-	_, err := c.db.Exec(query, txHash)
+// MarkCoinbaseRewardPaidOut marks a reward as paid out (by workshare hash)
+func (c *Client) MarkCoinbaseRewardPaidOut(workshareHash string) error {
+	query := `UPDATE pending_coinbase_rewards SET is_paid_out = TRUE WHERE workshare_hash = $1`
+	_, err := c.db.Exec(query, workshareHash)
 	if err != nil {
 		return fmt.Errorf("failed to mark reward paid out: %w", err)
 	}
@@ -726,7 +782,7 @@ type RewardDistribution struct {
 // DistributeRewardAtomically atomically marks a reward as paid out and distributes balances to miners.
 // This prevents double-distribution even with multiple service instances or failures.
 // Returns (distributed bool, error) - distributed=false means reward was already paid out.
-func (c *Client) DistributeRewardAtomically(txHash, poolID string, distributions []RewardDistribution) (bool, error) {
+func (c *Client) DistributeRewardAtomically(workshareHash, poolID string, distributions []RewardDistribution) (bool, error) {
 	tx, err := c.db.Begin()
 	if err != nil {
 		return false, fmt.Errorf("failed to begin transaction: %w", err)
@@ -739,12 +795,12 @@ func (c *Client) DistributeRewardAtomically(txHash, poolID string, distributions
 	var isUnlocked, isPaidOut bool
 	lockQuery := `
 		SELECT poolid, is_unlocked, is_paid_out FROM pending_coinbase_rewards
-		WHERE tx_hash = $1
+		WHERE workshare_hash = $1
 		FOR UPDATE
 	`
-	if err := tx.QueryRow(lockQuery, txHash).Scan(&dbPoolID, &isUnlocked, &isPaidOut); err != nil {
+	if err := tx.QueryRow(lockQuery, workshareHash).Scan(&dbPoolID, &isUnlocked, &isPaidOut); err != nil {
 		if err == sql.ErrNoRows {
-			return false, fmt.Errorf("reward %s not found", txHash)
+			return false, fmt.Errorf("reward %s not found", workshareHash)
 		}
 		return false, fmt.Errorf("failed to lock reward: %w", err)
 	}
@@ -756,18 +812,18 @@ func (c *Client) DistributeRewardAtomically(txHash, poolID string, distributions
 
 	// Sanity check: verify poolID matches
 	if dbPoolID != poolID {
-		return false, fmt.Errorf("pool ID mismatch for reward %s: expected %s, got %s", txHash, poolID, dbPoolID)
+		return false, fmt.Errorf("pool ID mismatch for reward %s: expected %s, got %s", workshareHash, poolID, dbPoolID)
 	}
 
 	// Sanity check: verify reward is actually unlocked
 	if !isUnlocked {
-		return false, fmt.Errorf("reward %s is not yet unlocked", txHash)
+		return false, fmt.Errorf("reward %s is not yet unlocked", workshareHash)
 	}
 
 	// Mark as paid out FIRST (within same transaction)
 	// This ensures if we crash after this point, we won't re-distribute
-	markQuery := `UPDATE pending_coinbase_rewards SET is_paid_out = TRUE WHERE tx_hash = $1`
-	if _, err := tx.Exec(markQuery, txHash); err != nil {
+	markQuery := `UPDATE pending_coinbase_rewards SET is_paid_out = TRUE WHERE workshare_hash = $1`
+	if _, err := tx.Exec(markQuery, workshareHash); err != nil {
 		return false, fmt.Errorf("failed to mark reward paid out: %w", err)
 	}
 
@@ -786,12 +842,12 @@ func (c *Client) DistributeRewardAtomically(txHash, poolID string, distributions
 			return false, fmt.Errorf("failed to update balance for %s: %w", dist.Address, err)
 		}
 
-		// Record balance change with reward tx_hash as reference for auditability
+		// Record balance change with workshare hash as reference for auditability
 		changeQuery := `
 			INSERT INTO balance_changes (poolid, address, amount, usage, created)
 			VALUES ($1, $2, $3::numeric, $4, NOW())
 		`
-		usageWithRef := fmt.Sprintf("%s:%s", dist.Usage, txHash)
+		usageWithRef := fmt.Sprintf("%s:%s", dist.Usage, workshareHash)
 		if _, err := tx.Exec(changeQuery, poolID, dist.Address, amountQuai, usageWithRef); err != nil {
 			return false, fmt.Errorf("failed to record balance change for %s: %w", dist.Address, err)
 		}
@@ -804,11 +860,11 @@ func (c *Client) DistributeRewardAtomically(txHash, poolID string, distributions
 	return true, nil
 }
 
-// CoinbaseRewardExists checks if a reward with the given tx hash already exists
-func (c *Client) CoinbaseRewardExists(txHash string) (bool, error) {
-	query := `SELECT EXISTS(SELECT 1 FROM pending_coinbase_rewards WHERE tx_hash = $1)`
+// CoinbaseRewardExists checks if a reward with the given workshare hash already exists
+func (c *Client) CoinbaseRewardExists(workshareHash string) (bool, error) {
+	query := `SELECT EXISTS(SELECT 1 FROM pending_coinbase_rewards WHERE workshare_hash = $1)`
 	var exists bool
-	err := c.db.QueryRow(query, txHash).Scan(&exists)
+	err := c.db.QueryRow(query, workshareHash).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("failed to check reward exists: %w", err)
 	}

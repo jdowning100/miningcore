@@ -278,10 +278,10 @@ func (e *Executor) distributeUnlockedRewards(ctx context.Context) error {
 		// Use the PPLNS scores that were snapshot at discovery time
 		scores := reward.MinerScores
 		if len(scores) == 0 {
-			log.Printf("Warning: No miner scores for reward block=%d tx=%s, skipping",
-				reward.BlockHeight, reward.TxHash)
+			log.Printf("Warning: No miner scores for reward block=%d workshare=%s, skipping",
+				reward.BlockHeight, reward.WorkshareHash)
 			// Mark as paid out atomically to avoid retrying forever
-			_, _ = e.pgClient.DistributeRewardAtomically(reward.TxHash, reward.PoolID, nil)
+			_, _ = e.pgClient.DistributeRewardAtomically(reward.WorkshareHash, reward.PoolID, nil)
 			continue
 		}
 
@@ -332,16 +332,16 @@ func (e *Executor) distributeUnlockedRewards(ctx context.Context) error {
 
 		// Atomically mark reward as paid out AND distribute all balances
 		// This prevents double-distribution even with multiple service instances or failures
-		distributed, err := e.pgClient.DistributeRewardAtomically(reward.TxHash, reward.PoolID, distributions)
+		distributed, err := e.pgClient.DistributeRewardAtomically(reward.WorkshareHash, reward.PoolID, distributions)
 		if err != nil {
-			log.Printf("Error distributing reward %s: %v", reward.TxHash, err)
+			log.Printf("Error distributing reward %s: %v", reward.WorkshareHash, err)
 			continue
 		}
 
 		if distributed {
-			log.Printf("Reward %s distributed successfully to %d recipients", reward.TxHash, len(distributions))
+			log.Printf("Reward %s distributed successfully to %d recipients", reward.WorkshareHash, len(distributions))
 		} else {
-			log.Printf("Reward %s was already distributed (idempotent skip)", reward.TxHash)
+			log.Printf("Reward %s was already distributed (idempotent skip)", reward.WorkshareHash)
 		}
 	}
 

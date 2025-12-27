@@ -332,7 +332,7 @@ public class QuaiPool : PoolBase
     {
         // Check interval - use Task.Delay to guarantee minimum spacing between iterations
         // even if processing many miners takes longer than the interval
-        const int CheckIntervalSeconds = 3;
+        const int CheckIntervalSeconds = 5;
 
         await Guard(async () =>
         {

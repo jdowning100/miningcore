@@ -466,6 +466,7 @@ public class QuaiBitcoinJobManager : JobManagerBase<QuaiBitcoinJob>
         share.Worker = context.Worker;
         share.UserAgent = context.UserAgent;
         share.Source = poolConfig.Id;  // Pool ID - matches shares.poolid for PPLNS queries
+        share.BlockType = algorithmName;  // "sha" or "scrypt" - stored in blocks.type for block candidates
         share.Created = clock.Now;
 
         // Check staleness based on quaiHeight difference (like alphapool):

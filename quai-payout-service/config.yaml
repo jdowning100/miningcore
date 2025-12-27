@@ -46,7 +46,7 @@ payout_interval_seconds: 30
 pool_fee_percent: 0.01
 
 # Address to send pool fees to
-pool_fee_address: ""
+pool_fee_address: "0x0044d44F7cF090D3fEF2090Dd920955813063036"
 
 # Log level (debug, info, warn, error)
 log_level: "info"

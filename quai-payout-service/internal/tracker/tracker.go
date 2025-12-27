@@ -191,7 +191,8 @@ func (t *CoinbaseTracker) scan(ctx context.Context) {
 
 	// Don't scan if we're caught up
 	if startHeight > safeHeight {
-		// Still check for unlocked rewards
+		// Still check pending blocks for coinbase and unlocked rewards
+		t.checkPendingBlocksForCoinbase(currentHeight)
 		t.checkUnlockedRewards(currentHeight)
 		return
 	}
@@ -237,6 +238,10 @@ func (t *CoinbaseTracker) scan(ctx context.Context) {
 	if rewardsFound > 0 {
 		log.Printf("Found %d rewards in blocks %d-%d", rewardsFound, startHeight, endHeight)
 	}
+
+	// Check pending blocks for coinbase transactions via API
+	// This handles blocks that are 50+ blocks old but coinbase wasn't discovered via chain scan
+	t.checkPendingBlocksForCoinbase(currentHeight)
 
 	// Check for unlocked rewards
 	t.checkUnlockedRewards(currentHeight)
@@ -321,6 +326,37 @@ func (t *CoinbaseTracker) scanBlock(ctx context.Context, height int64) ([]*postg
 			}
 		}
 
+		// Extract workshare hash from input data (bytes 1-33, after lockup byte)
+		// Input format: [1 byte lockup] [32 bytes workshare hash]
+		// In hex: [2 chars lockup] [64 chars workshare hash]
+		workshareHash := "0x" + inputData[2:66] // Skip lockup byte, take 32 bytes (64 hex chars)
+
+		// Look up the block in miningcore's blocks table using the workshare hash
+		// This gives us the authoritative pool ID and algorithm type
+		blockLookup, err := t.pgClient.LookupBlockByWorkshareHash(workshareHash)
+		if err != nil {
+			log.Printf("Error looking up block by workshare hash %s: %v", workshareHash, err)
+			continue
+		}
+
+		// Determine pool ID and algorithm
+		var actualPoolID, algorithm string
+		if blockLookup != nil {
+			// Found in miningcore's blocks table - use authoritative data
+			actualPoolID = blockLookup.PoolID
+			algorithm = blockLookup.Algorithm
+			if algorithm == "" {
+				// Fallback for blocks mined before algorithm was stored
+				algorithm = poolID // Use address-based inference
+			}
+			log.Printf("Block lookup: workshare=%s -> pool=%s algo=%s", workshareHash, actualPoolID, algorithm)
+		} else {
+			// Not found in blocks table - use address-based inference (backwards compatibility)
+			actualPoolID = poolID
+			algorithm = poolID
+			log.Printf("Block not found in miningcore DB, using address inference: workshare=%s pool=%s", workshareHash, actualPoolID)
+		}
+
 		// Parse the value
 		value := new(big.Int)
 		valueStr := strings.TrimPrefix(tx.Value, "0x")
@@ -330,16 +366,17 @@ func (t *CoinbaseTracker) scanBlock(ctx context.Context, height int64) ([]*postg
 		value.SetString(valueStr, 16)
 
 		reward := &postgres.CoinbaseReward{
-			TxHash:       tx.Hash,
-			PoolID:       poolID,
-			ToAddress:    tx.To,
-			Value:        value,
-			Algorithm:    poolID, // For backwards compatibility, use poolID as algorithm
-			BlockHeight:  height,
-			BlockHash:    blockData.Hash,
-			UnlockHeight: height + t.cfg.CoinbaseMaturity,
-			IsUnlocked:   false,
-			IsPaidOut:    false,
+			WorkshareHash: workshareHash,
+			TxHash:        tx.Hash,
+			PoolID:        actualPoolID,
+			ToAddress:     tx.To,
+			Value:         value,
+			Algorithm:     algorithm,
+			BlockHeight:   height,
+			BlockHash:     blockData.Hash,
+			UnlockHeight:  height + t.cfg.CoinbaseMaturity,
+			IsUnlocked:    false,
+			IsPaidOut:     false,
 		}
 
 		rewards = append(rewards, reward)
@@ -350,8 +387,8 @@ func (t *CoinbaseTracker) scanBlock(ctx context.Context, height int64) ([]*postg
 
 // processReward processes a found coinbase reward
 func (t *CoinbaseTracker) processReward(reward *postgres.CoinbaseReward) error {
-	// Check if we already have this reward
-	exists, err := t.pgClient.CoinbaseRewardExists(reward.TxHash)
+	// Check if we already have this reward (by workshare hash)
+	exists, err := t.pgClient.CoinbaseRewardExists(reward.WorkshareHash)
 	if err != nil {
 		return fmt.Errorf("failed to check if reward exists: %w", err)
 	}
@@ -394,8 +431,13 @@ func (t *CoinbaseTracker) processReward(reward *postgres.CoinbaseReward) error {
 	valueFloat.Quo(valueFloat, divisor)
 	valueF64, _ := valueFloat.Float64()
 
-	log.Printf("Coinbase reward included: pool=%s block=%d value=%.6f QUAI tx=%s unlocks_at=%d miners=%d",
-		reward.PoolID, reward.BlockHeight, valueF64, reward.TxHash, reward.UnlockHeight, len(minerScores))
+	log.Printf("Coinbase reward included: pool=%s block=%d value=%.6f QUAI workshare=%s tx=%s unlocks_at=%d miners=%d",
+		reward.PoolID, reward.BlockHeight, valueF64, reward.WorkshareHash, reward.TxHash, reward.UnlockHeight, len(minerScores))
+
+	// Mark the block as confirmed in miningcore's blocks table
+	if err := t.pgClient.UpdateBlockStatusByWorkshareHash(reward.WorkshareHash, "confirmed", valueF64); err != nil {
+		log.Printf("Warning: failed to update block status to confirmed: %v", err)
+	}
 
 	// Notify callback
 	if t.onRewardFound != nil {
@@ -403,6 +445,98 @@ func (t *CoinbaseTracker) processReward(reward *postgres.CoinbaseReward) error {
 	}
 
 	return nil
+}
+
+// checkPendingBlocksForCoinbase checks pending blocks that are 50+ blocks old
+// and queries the API to discover their coinbase transactions
+func (t *CoinbaseTracker) checkPendingBlocksForCoinbase(currentHeight int64) {
+	// Get all pending blocks from miningcore
+	pendingBlocks, err := t.pgClient.GetPendingBlocks()
+	if err != nil {
+		log.Printf("Error getting pending blocks: %v", err)
+		return
+	}
+
+	const coinbaseDiscoveryThreshold = 50 // blocks after submission before we expect coinbase to be discoverable
+
+	for _, block := range pendingBlocks {
+		// Skip blocks that don't have a workshare hash (shouldn't happen, but be safe)
+		if block.WorkshareHash == "" {
+			log.Printf("Error: block without workshare found %d", block.BlockHeight)
+			continue
+		}
+
+		// Only check blocks that are 50+ blocks old
+		if currentHeight < block.BlockHeight+coinbaseDiscoveryThreshold {
+			continue
+		}
+
+		// Check if we already have this reward in pending_coinbase_rewards
+		exists, err := t.pgClient.CoinbaseRewardExists(block.WorkshareHash)
+		if err != nil {
+			log.Printf("Error checking if reward exists for workshare %s: %v", block.WorkshareHash, err)
+			continue
+		}
+		if exists {
+			// Already discovered this coinbase, skip
+			continue
+		}
+
+		// Query the API for the coinbase transaction
+		coinbaseTx, err := t.rpcClient.GetCoinbaseTxForWorkShareHash(block.WorkshareHash)
+		if err != nil {
+			log.Printf("Error querying coinbase for workshare %s: %v", block.WorkshareHash, err)
+			continue
+		}
+
+		if coinbaseTx == nil {
+			// Not found yet - this could mean the workshare hasn't been included in a block yet
+			// or it was orphaned. Log at debug level since this is expected for recent blocks.
+			log.Printf("Coinbase not yet found for pending block %d (workshare=%s, age=%d blocks)",
+				block.BlockHeight, block.WorkshareHash, currentHeight-block.BlockHeight)
+			continue
+		}
+
+		// Parse the coinbase transaction and create a reward
+		log.Printf("Discovered coinbase via API for block %d: workshare=%s tx=%s",
+			block.BlockHeight, block.WorkshareHash, coinbaseTx.Hash)
+
+		// Parse block height from coinbase tx
+		var coinbaseBlockHeight int64
+		if coinbaseTx.BlockNumber != "" {
+			numStr := strings.TrimPrefix(coinbaseTx.BlockNumber, "0x")
+			fmt.Sscanf(numStr, "%x", &coinbaseBlockHeight)
+		}
+
+		// Parse the value
+		value := new(big.Int)
+		valueStr := strings.TrimPrefix(coinbaseTx.Value, "0x")
+		if valueStr == "" {
+			valueStr = "0"
+		}
+		value.SetString(valueStr, 16)
+
+		// Create the reward using block info from miningcore
+		reward := &postgres.CoinbaseReward{
+			WorkshareHash: block.WorkshareHash,
+			TxHash:        coinbaseTx.Hash,
+			PoolID:        block.PoolID,
+			ToAddress:     coinbaseTx.To,
+			Value:         value,
+			Algorithm:     block.Type,
+			BlockHeight:   coinbaseBlockHeight, // Height where coinbase was included
+			BlockHash:     coinbaseTx.BlockHash,
+			UnlockHeight:  coinbaseBlockHeight + t.cfg.CoinbaseMaturity,
+			IsUnlocked:    false,
+			IsPaidOut:     false,
+		}
+
+		// Process the reward (calculates PPLNS scores, inserts into DB, and marks block as confirmed)
+		if err := t.processReward(reward); err != nil {
+			log.Printf("Error processing discovered reward: %v", err)
+			continue
+		}
+	}
 }
 
 // checkUnlockedRewards checks for rewards that have unlocked
@@ -421,7 +555,7 @@ func (t *CoinbaseTracker) checkUnlockedRewards(currentHeight int64) {
 
 		if currentHeight >= reward.UnlockHeight {
 			// Mark as unlocked in database
-			if err := t.pgClient.MarkCoinbaseRewardUnlocked(reward.TxHash); err != nil {
+			if err := t.pgClient.MarkCoinbaseRewardUnlocked(reward.WorkshareHash); err != nil {
 				log.Printf("Error marking reward unlocked: %v", err)
 				continue
 			}
@@ -432,8 +566,8 @@ func (t *CoinbaseTracker) checkUnlockedRewards(currentHeight int64) {
 			valueFloat.Quo(valueFloat, divisor)
 			valueF64, _ := valueFloat.Float64()
 
-			log.Printf("Reward unlocked: pool=%s block=%d value=%.6f QUAI tx=%s",
-				reward.PoolID, reward.BlockHeight, valueF64, reward.TxHash)
+			log.Printf("Reward unlocked: pool=%s block=%d value=%.6f QUAI workshare=%s",
+				reward.PoolID, reward.BlockHeight, valueF64, reward.WorkshareHash)
 
 			// Notify callback
 			if t.onRewardUnlocked != nil {
@@ -468,9 +602,9 @@ func (t *CoinbaseTracker) GetUnlockedRewards() []*postgres.CoinbaseReward {
 	return rewards
 }
 
-// MarkRewardPaidOut marks a reward as having been included in payouts
-func (t *CoinbaseTracker) MarkRewardPaidOut(txHash string) {
-	if err := t.pgClient.MarkCoinbaseRewardPaidOut(txHash); err != nil {
+// MarkRewardPaidOut marks a reward as having been included in payouts (by workshare hash)
+func (t *CoinbaseTracker) MarkRewardPaidOut(workshareHash string) {
+	if err := t.pgClient.MarkCoinbaseRewardPaidOut(workshareHash); err != nil {
 		log.Printf("Error marking reward paid out: %v", err)
 	}
 }
