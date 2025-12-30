@@ -177,8 +177,9 @@ public class QuaiBitcoinJobManager : JobManagerBase<QuaiBitcoinJob>
 
             var isNew = isNewBlock || quaiHeightChanged;
 
-            if(isNewBlock)
-                messageBus.NotifyChainHeight(poolConfig.Id, (ulong)blockTemplate.Height, poolConfig.Template);
+            // Notify chain height changes using QuaiHeight (not the merge-mining template height)
+            if(isNewBlock || quaiHeightChanged)
+                messageBus.NotifyChainHeight(poolConfig.Id, (ulong)blockTemplate.QuaiHeight, poolConfig.Template);
 
             if(isNew || forceUpdate)
             {
@@ -198,9 +199,9 @@ public class QuaiBitcoinJobManager : JobManagerBase<QuaiBitcoinJob>
                     else
                         logger.Info(() => $"Detected new block {blockTemplate.Height} (quaiHeight={blockTemplate.QuaiHeight})");
 
-                    // Update stats
+                    // Update stats - use QuaiHeight for the actual chain height (not the merge-mining template height)
                     BlockchainStats.LastNetworkBlockTime = clock.Now;
-                    BlockchainStats.BlockHeight = (ulong)blockTemplate.Height;
+                    BlockchainStats.BlockHeight = (ulong)blockTemplate.QuaiHeight;
                     BlockchainStats.NetworkDifficulty = job.Difficulty;
                     BlockchainStats.NextNetworkTarget = blockTemplate.Target;
                     BlockchainStats.NextNetworkBits = blockTemplate.Bits;
@@ -208,6 +209,9 @@ public class QuaiBitcoinJobManager : JobManagerBase<QuaiBitcoinJob>
                 else if(quaiHeightChanged)
                 {
                     logger.Info(() => $"QuaiHeight changed {previousQuaiHeight} -> {blockTemplate.QuaiHeight} at block {blockTemplate.Height}");
+
+                    // Update block height when quaiHeight changes
+                    BlockchainStats.BlockHeight = (ulong)blockTemplate.QuaiHeight;
                 }
                 else
                 {

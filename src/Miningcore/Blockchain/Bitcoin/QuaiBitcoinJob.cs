@@ -308,9 +308,10 @@ public class QuaiBitcoinJob
         var headerSha256dHex = headerSha256dReversed.ToHexString();
 
         // Build share result
+        // Use QuaiHeight for the actual chain height (not the merge-mining template height)
         var result = new Share
         {
-            BlockHeight = BlockTemplate.Height,
+            BlockHeight = QuaiHeight,
             NetworkDifficulty = Difficulty,
             Difficulty = stratumDifficulty / shareMultiplier
         };
