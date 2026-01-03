@@ -483,6 +483,11 @@ public class QuaiPool : PoolBase
                     await connection.RespondAsync(true, request.Id);
                     break;
 
+                case BitcoinStratumMethods.GetTransactions:
+                    // Return empty array - Quai uses pre-built coinbase, no transaction list available
+                    await connection.RespondAsync(Array.Empty<string>(), request.Id);
+                    break;
+
                 default:
                     logger.Debug(() => $"[{connection.ConnectionId}] Unsupported RPC request: {JsonConvert.SerializeObject(request, serializerSettings)}");
                     await connection.RespondErrorAsync(StratumError.Other, $"Unsupported request {request.Method}", request.Id);

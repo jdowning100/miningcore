@@ -76,9 +76,9 @@ public class PoolApiController : ApiControllerBase
                 result.LastPoolBlockTime = lastBlockTime;
 
                 var payoutConfig = config.PaymentProcessing;
-                result.PaymentProcessing.PayoutSchemeConfig = payoutConfig?.PayoutSchemeConfig.ToObject<ApiPoolPayoutSchemeConfig>();
+                result.PaymentProcessing.PayoutSchemeConfig = payoutConfig?.PayoutSchemeConfig?.ToObject<ApiPoolPayoutSchemeConfig>();
                 // display block finder percentage only if PPLNSBF is activated
-                if(payoutConfig?.PayoutScheme != PayoutScheme.PPLNSBF)
+                if(payoutConfig?.PayoutScheme != PayoutScheme.PPLNSBF && result.PaymentProcessing.PayoutSchemeConfig != null)
                     result.PaymentProcessing.PayoutSchemeConfig.BlockFinderPercentage = null;
 
                 if(lastBlockTime.HasValue)
@@ -155,9 +155,9 @@ public class PoolApiController : ApiControllerBase
         response.Pool.LastPoolBlockTime = lastBlockTime;
 
         var payoutConfig = pool.PaymentProcessing;
-        response.Pool.PaymentProcessing.PayoutSchemeConfig = payoutConfig?.PayoutSchemeConfig.ToObject<ApiPoolPayoutSchemeConfig>();
+        response.Pool.PaymentProcessing.PayoutSchemeConfig = payoutConfig?.PayoutSchemeConfig?.ToObject<ApiPoolPayoutSchemeConfig>();
         // display block finder percentage only if PPLNSBF is activated
-        if(payoutConfig?.PayoutScheme != PayoutScheme.PPLNSBF)
+        if(payoutConfig?.PayoutScheme != PayoutScheme.PPLNSBF && response.Pool.PaymentProcessing.PayoutSchemeConfig != null)
             response.Pool.PaymentProcessing.PayoutSchemeConfig.BlockFinderPercentage = null;
 
         if(lastBlockTime.HasValue)
