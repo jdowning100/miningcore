@@ -1033,14 +1033,28 @@ func (c *Client) ConfirmPendingPayment(paymentID int64, txHash string) error {
 	}
 	defer tx.Rollback()
 
-	// Get the pending payment details
+	// Get the pending payment details including deductions to determine pool ID
 	var address, amountStr string
-	query := `SELECT address, amount::text FROM pending_payments WHERE id = $1 AND status = 'pending'`
-	if err := tx.QueryRow(query, paymentID).Scan(&address, &amountStr); err != nil {
+	var deductionsJSON []byte
+	query := `SELECT address, amount::text, deductions FROM pending_payments WHERE id = $1 AND status = 'pending'`
+	if err := tx.QueryRow(query, paymentID).Scan(&address, &amountStr, &deductionsJSON); err != nil {
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("pending payment %d not found or already processed", paymentID)
 		}
 		return fmt.Errorf("failed to get pending payment: %w", err)
+	}
+
+	// Extract pool ID from deductions (map of poolID -> amount)
+	poolIDForRecord := c.poolIDs[0] // fallback
+	if len(deductionsJSON) > 0 {
+		var deductions map[string]string
+		if err := json.Unmarshal(deductionsJSON, &deductions); err == nil {
+			// Use the first (and typically only) pool ID from deductions
+			for poolID := range deductions {
+				poolIDForRecord = poolID
+				break
+			}
+		}
 	}
 
 	// Mark as confirmed
@@ -1049,9 +1063,7 @@ func (c *Client) ConfirmPendingPayment(paymentID int64, txHash string) error {
 		return fmt.Errorf("failed to confirm pending payment: %w", err)
 	}
 
-	// Record the payment in the payments table (use first pool ID for the record)
-	// This is for miningcore's payments table which requires a poolid
-	poolIDForRecord := c.poolIDs[0]
+	// Record the payment in the payments table with the correct pool ID
 	insertQuery := `
 		INSERT INTO payments (poolid, coin, address, amount, transactionconfirmationdata, created)
 		VALUES ($1, 'QUAI', $2, $3::numeric, $4, NOW())
