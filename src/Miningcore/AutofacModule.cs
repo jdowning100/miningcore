@@ -241,6 +241,11 @@ public class AutofacModule : Module
         builder.RegisterType<QuaiBitcoinJobManager>();
 
         //////////////////////
+        // Pearl
+
+        builder.RegisterType<PearlBitcoinJobManager>();
+
+        //////////////////////
         // Satoshicash
 
         builder.RegisterType<SatoshicashJobManager>();

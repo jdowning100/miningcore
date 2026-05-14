@@ -2421,6 +2421,32 @@
         "explorerTxLink": "https://quaiscan.io/tx/{0}",
         "explorerAccountLink": "https://quaiscan.io/address/{0}"
     },
+    "pearl": {
+        "name": "Pearl",
+        "symbol": "PRL",
+        "family": "pearl",
+        "website": "https://arxiv.org/abs/2504.09971",
+        "market": "",
+        "_comment": "Pearl is a PoUW chain. Hashers below are unused; share/block verification and final block construction are delegated to pearl-pool-service. Required by BitcoinTemplate schema.",
+        "coinbaseHasher": {
+            "hash": "sha256d"
+        },
+        "headerHasher": {
+            "hash": "sha256d"
+        },
+        "blockHasher": {
+            "hash": "reverse",
+            "args": [
+                {
+                    "hash": "sha256d"
+                }
+            ]
+        },
+        "shareMultiplier": 1,
+        "explorerBlockLink": "https://lordofpearls.xyz/block/$hash$",
+        "explorerTxLink": "https://lordofpearls.xyz/tx/{0}",
+        "explorerAccountLink": "https://lordofpearls.xyz/address/{0}"
+    },
     "quai-scrypt": {
         "name": "Quai Scrypt",
         "canonicalName": "Quai",

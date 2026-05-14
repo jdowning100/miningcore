@@ -55,6 +55,9 @@ public enum CoinFamily
     [EnumMember(Value = "quai")]
     Quai,
 
+    [EnumMember(Value = "pearl")]
+    Pearl,
+
     [EnumMember(Value = "satoshicash")]
     Satoshicash,
 
@@ -181,6 +184,7 @@ public abstract partial class CoinTemplate
         {CoinFamily.Nexa, typeof(BitcoinTemplate)},
         {CoinFamily.Progpow, typeof(ProgpowCoinTemplate)},
         {CoinFamily.Quai, typeof(BitcoinTemplate)},
+        {CoinFamily.Pearl, typeof(BitcoinTemplate)},
         {CoinFamily.Satoshicash, typeof(BitcoinTemplate)},
         {CoinFamily.Warthog, typeof(WarthogCoinTemplate)},
         {CoinFamily.Xelis, typeof(XelisCoinTemplate)},

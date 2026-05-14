@@ -21,7 +21,10 @@ using static Miningcore.Util.ActionUtils;
 
 namespace Miningcore.Blockchain.Bitcoin;
 
-[CoinFamily(CoinFamily.Bitcoin, CoinFamily.Nexa)]
+// Pearl is a btcd fork and uses the standard Bitcoin wallet RPCs
+// (sendmany, sendtoaddress, gettransaction, etc.) via btcwallet, so the
+// existing Bitcoin payout handler works unchanged for Pearl payouts.
+[CoinFamily(CoinFamily.Bitcoin, CoinFamily.Nexa, CoinFamily.Pearl)]
 public class BitcoinPayoutHandler : PayoutHandlerBase,
     IPayoutHandler
 {

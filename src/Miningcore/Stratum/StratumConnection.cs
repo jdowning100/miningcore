@@ -49,7 +49,9 @@ public class StratumConnection
     private readonly RecyclableMemoryStreamManager rmsm;
     private readonly IMasterClock clock;
 
-    private const int MaxInboundRequestLength = 0x8000;
+    // Pearl shares are base64(PlainProof.to_bytes()) and are a few hundred KiB
+    // for the default mainnet shape.
+    private const int MaxInboundRequestLength = 1024 * 1024;
     public static readonly Encoding Encoding = new UTF8Encoding(false);
 
     private Stream networkStream;
